@@ -1,0 +1,2 @@
+# Preserve the upstream font notice byte-for-byte, including its original trailing space.
+licenses/Roboto-OFL.txt -text whitespace=-blank-at-eol

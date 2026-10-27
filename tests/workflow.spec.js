@@ -46,7 +46,15 @@ async function sampleImage(page, color = '#91bde6') {
 
 test('mobile workflow, original preservation, exact PDF/privacy and restart persistence', async ({ page }) => {
   const errors = [];
+  const externalRequests = [];
   page.on('pageerror', error => errors.push(error.message));
+  page.on('request', request => {
+    if (/^https?:/.test(request.url()) && new URL(request.url()).origin !== new URL(baseURL).origin) externalRequests.push(request.url());
+  });
+  await page.addInitScript(() => {
+    window.cspViolations = [];
+    addEventListener('securitypolicyviolation', event => window.cspViolations.push(event.violatedDirective));
+  });
   await setup(page);
   await createVisit(page);
   await addNote(page, 'PRIVATE_ORIGINAL_COST_999');
@@ -99,15 +107,46 @@ test('mobile workflow, original preservation, exact PDF/privacy and restart pers
   const pdf = await getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
   expect(pdf.numPages).toBe(previewImages.length);
   expect(await pdf.getAttachments()).toBeNull();
-  expect((await pdf.getMetadata()).metadata).toBeNull();
+  const metadata = await pdf.getMetadata();
+  expect(metadata.metadata?.getRaw() || '').not.toContain('PRIVATE_');
+  expect(metadata.info.Title).toBe('Visit report');
+  expect(metadata.info.Creator).toBe('ArbeitMgmt');
+  expect(JSON.stringify(metadata.info)).not.toContain('PRIVATE_');
+  let text = '';
+  let imageCount = 0;
   for (let i = 0; i < previewImages.length; i++) {
     const pdfPage = await pdf.getPage(i + 1);
     const operators = await pdfPage.getOperatorList();
-    expect(operators.fnArray.filter(op => op === OPS.paintImageXObject)).toHaveLength(1);
-    expect((await pdfPage.getTextContent()).items).toHaveLength(0);
-    const jpeg = Buffer.from(previewImages[i].split(',')[1], 'base64');
-    expect(Buffer.from(bytes).includes(jpeg)).toBe(true);
+    imageCount += operators.fnArray.filter(op => op === OPS.paintImageXObject).length;
+    text += (await pdfPage.getTextContent()).items.map(item => item.str || '').join(' ');
+    expect(await pdfPage.getAnnotations()).toEqual([]);
+    expect(await pdfPage.getStructTree()).toBeNull();
   }
+  expect(imageCount).toBe(1);
+  expect(text.replace(/\s/g, '')).toContain('Österreich: erledigt. Zażółć gęślą jaźń. İstanbul: ışık. Brașov: curățat.'.replace(/\s/g, ''));
+  text = text.replace(/\s+/g, ' ');
+  expect(text).toContain('Visible synthetic garden');
+  expect(text).not.toContain('PRIVATE_');
+  expect(text.indexOf('Work completed')).toBeLessThan(text.indexOf('Visible synthetic garden'));
+  expect(text.indexOf('Photo 1:')).toBeLessThan(text.indexOf('Visible synthetic garden'));
+  const rendered = await page.evaluate(async data => {
+    const pdfjs = await import('/src/vendor/pdf.mjs');
+    const task = pdfjs.getDocument({ data: new Uint8Array(data), isEvalSupported: false, useSystemFonts: false });
+    const document = await task.promise;
+    try {
+      const pages = [];
+      for (let i = 1; i <= document.numPages; i++) {
+        const page = await document.getPage(i);
+        const viewport = page.getViewport({ scale: 1240 / page.getViewport({ scale: 1 }).width });
+        const canvas = globalThis.document.createElement('canvas');
+        canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        pages.push(canvas.toDataURL('image/png'));
+      }
+      return pages;
+    } finally { await task.destroy(); }
+  }, [...bytes]);
+  expect(rendered).toEqual(previewImages);
   await pdf.destroy();
   await page.reload();
   await expect(page.locator('.visit-card')).toHaveCount(1);
@@ -115,6 +154,8 @@ test('mobile workflow, original preservation, exact PDF/privacy and restart pers
   await expect(page.locator('textarea[name^="note-"]').first()).toContainText('Österreich');
   expect((await records(page))[0].photos).toHaveLength(2);
   expect(errors).toEqual([]);
+  expect(externalRequests).toEqual([]);
+  expect(await page.evaluate(() => window.cspViolations)).toEqual([]);
 });
 
 test('browser close/reopen retains local data with a persistent profile', async ({}, testInfo) => {
@@ -154,7 +195,7 @@ test('offline reload, capture and actual PDF download make no server dependency'
   const downloadPromise = page.waitForEvent('download');
   await page.locator('#download-pdf').click();
   const bytes = await readFile(await (await downloadPromise).path());
-  expect(bytes.subarray(0, 8).toString()).toBe('%PDF-1.4');
+  expect(bytes.subarray(0, 8).toString()).toBe('%PDF-1.7');
   expect((await records(page))[0].notes[0].text).toBe('Captured offline');
   expect((await records(page))[0].photos).toHaveLength(1);
   await context.setOffline(false);
@@ -172,6 +213,9 @@ test('all five languages render Unicode PDF pages; language changes leave conten
     await page.locator('#language').selectOption(language);
     await page.locator('#language-settings button').click();
     await expect(page.locator('html')).toHaveAttribute('lang', language);
+    await expect(page.locator('#main')).not.toContainText('{price}');
+    const price = await page.evaluate(async language => (await import('/src/format.js')).formatPrice(language), language);
+    await expect(page.locator('#main')).toContainText(price);
     await page.locator('[data-route=home]').last().click();
     await page.locator('.visit-card').click();
     await expect(page.locator('textarea[name^=note-]')).toHaveValue(originalText);
@@ -179,7 +223,16 @@ test('all five languages render Unicode PDF pages; language changes leave conten
     await expect(page.locator('.pdf-page')).toBeVisible();
     expect(await page.locator('.pdf-page').evaluate(el => el.naturalWidth)).toBe(1240);
     const image = await page.locator('.pdf-page').first().getAttribute('src');
-    await writeFile(test.info().outputPath(`report-${language}.jpg`), Buffer.from(image.split(',')[1], 'base64'));
+    await writeFile(test.info().outputPath(`report-${language}.png`), Buffer.from(image.split(',')[1], 'base64'));
+    const downloadPromise = page.waitForEvent('download');
+    await page.locator('#download-pdf').click();
+    const bytes = new Uint8Array(await readFile(await (await downloadPromise).path()));
+    const pdf = await getDocument({ data: bytes, isEvalSupported: false }).promise;
+    let text = '';
+    for (let i = 1; i <= pdf.numPages; i++) text += (await (await pdf.getPage(i)).getTextContent()).items.map(item => item.str || '').join('');
+    expect(text.replace(/\s/g, '')).toContain(originalText.replace(/\s/g, ''));
+    expect(text).not.toContain('\uFFFD');
+    await pdf.destroy();
     await page.screenshot({ path: test.info().outputPath(`unicode-${language}.png`), fullPage: true });
   }
 });
@@ -299,30 +352,33 @@ test('long text, all sections and image paginate without dropping included text'
       visit.notes.push(updateNote(newNote(long, category), long, category, 'client'));
     }
     visit.notes.push(newNote('PRIVATE_SENTINEL'));
-    const canvas = document.createElement('canvas');
+    const canvas = globalThis.document.createElement('canvas');
     canvas.width = 600; canvas.height = 1200;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#91bde6'; ctx.fillRect(0, 0, canvas.width, canvas.height);
     visit.photos.push({ reportImage: canvas.toDataURL('image/jpeg'), visibility: 'client', caption: 'Synthetic long-report photo' });
-    const drawn = [];
-    const noteLines = [];
-    const original = CanvasRenderingContext2D.prototype.fillText;
-    CanvasRenderingContext2D.prototype.fillText = function (text, ...args) {
-      drawn.push(text);
-      if (this.font.startsWith('26px')) noteLines.push(text);
-      return original.call(this, text, ...args);
-    };
+    const pdf = await renderReport(clientReport(visit, 'en'));
+    const pdfjs = await import('/src/vendor/pdf.mjs');
+    const task = pdfjs.getDocument({ data: new Uint8Array(await pdf.blob.arrayBuffer()), isEvalSupported: false });
+    const document = await task.promise;
     try {
-      const pdf = await renderReport(clientReport(visit, 'en'));
-      return { drawn, noteLines, pages: pdf.pages.length, long, bytes: pdf.blob.size };
-    } finally { CanvasRenderingContext2D.prototype.fillText = original; }
+      const pageText = [];
+      let noteText = '';
+      for (let i = 1; i <= document.numPages; i++) {
+        const content = await (await document.getPage(i)).getTextContent();
+        pageText.push(content.items.map(item => item.str || '').join(''));
+        noteText += content.items.filter(item => Math.abs(item.height - 11) < 0.1).map(item => item.str || '').join('');
+      }
+      return { pageText, noteText, pages: pdf.pages.length, long, bytes: pdf.blob.size };
+    } finally { await task.destroy(); }
   });
   expect(result.pages).toBeGreaterThan(3);
   expect(result.bytes).toBeGreaterThan(10000);
-  const drawn = result.drawn.join('');
-  expect(drawn).not.toContain('PRIVATE_SENTINEL');
-  for (const section of ['Work completed', 'Observations', 'Outstanding items']) expect(drawn).toContain(section);
-  expect(result.noteLines.join('')).toBe(result.long.trim().repeat(3));
+  const text = result.pageText.join('');
+  expect(text).not.toContain('PRIVATE_SENTINEL');
+  for (const section of ['Work completed', 'Observations', 'Outstanding items']) expect(text).toContain(section);
+  const stripped = result.noteText.replace(/\s/g, '');
+  expect(stripped).toContain(result.long.replace(/\s/g, '').repeat(3));
 });
 
 test('file share hands off only the preview PDF; cancellation and unsupported platforms are explicit', async ({ page }) => {
@@ -341,7 +397,7 @@ test('file share hands off only the preview PDF; cancellation and unsupported pl
   const shared = await page.evaluate(() => window.shared);
   expect(shared.count).toBe(1);
   expect(shared.type).toBe('application/pdf');
-  expect(Buffer.from(shared.bytes).subarray(0, 8).toString()).toBe('%PDF-1.4');
+  expect(Buffer.from(shared.bytes).subarray(0, 8).toString()).toBe('%PDF-1.7');
   expect(Buffer.from(shared.bytes).toString()).not.toContain('PRIVATE_SHARE_SENTINEL');
   await page.evaluate(() => Object.defineProperty(navigator, 'share', { configurable: true, value: async () => { throw new DOMException('Cancelled', 'AbortError'); } }));
   await page.locator('#share-pdf').click();
@@ -383,4 +439,65 @@ test('unconfirmed offline setup surfaces a failure instead of hanging or claimin
   await page.goto('/');
   await expect(page.locator('#offline-state')).toContainText('Offline setup failed');
   await expect(page.locator('#offline-state')).not.toContainText('Offline app ready');
+});
+
+test('included photos require descriptive captions without blocking internal captures or losing saved work', async ({ page }) => {
+  await setup(page);
+  await createVisit(page, 'SYNTHETIC photo captions');
+  await page.locator('[name=photos]').setInputFiles({
+    name: 'synthetic.jpg', mimeType: 'image/jpeg', buffer: Buffer.from((await sampleImage(page)).split(',')[1], 'base64'),
+  });
+  await page.locator('button[value=preview]').click();
+  await expect(page.locator('.pdf-page')).toBeVisible();
+  await page.locator('#back-editor').click();
+  await page.locator('.photo-card input[type=checkbox]').check();
+  await page.locator('button[value=preview]').click();
+  await expect(page.locator('#feedback')).toContainText('Add a description of the work/result');
+  await expect(page.locator('#edit-visit')).toBeVisible();
+  expect((await records(page))[0].photos).toHaveLength(1);
+  await page.locator('.photo-card textarea').fill('Synthetic cleared path after work');
+  await page.locator('button[value=preview]').click();
+  await expect(page.locator('.pdf-page').first()).toBeVisible();
+  await page.locator('summary').filter({ hasText: 'Readable report transcript' }).click();
+  await expect(page.locator('.transcript')).toContainText('Synthetic cleared path after work');
+  await expect(page.locator('.transcript img')).toHaveAttribute('alt', 'Synthetic cleared path after work');
+});
+
+test('even a restored report image is re-encoded to strip source metadata before vector PDF export', async ({ page }) => {
+  await setup(page);
+  const image = await sampleImage(page);
+  const jpeg = Buffer.from(image.split(',')[1], 'base64');
+  const marker = Buffer.from('PRIVATE_RESTORED_JPEG_COMMENT');
+  const annotated = Buffer.concat([jpeg.subarray(0, 2), Buffer.from([0xff, 0xfe, 0, marker.length + 2]), marker, jpeg.subarray(2)]);
+  const exported = await page.evaluate(async data => {
+    const { renderReport } = await import('/src/pdf.js');
+    const { newVisit, clientReport } = await import('/src/model.js');
+    const visit = newVisit('SYNTHETIC restored image');
+    visit.photos.push({ visibility: 'client', reportImage: data, caption: 'Synthetic imported garden' });
+    const pdf = await renderReport(clientReport(visit, 'en'));
+    return [...new Uint8Array(await pdf.blob.arrayBuffer())];
+  }, `data:image/jpeg;base64,${annotated.toString('base64')}`);
+  expect(Buffer.from(exported).includes(marker)).toBe(false);
+  expect(Buffer.from(exported).includes(annotated)).toBe(false);
+  const pdf = await getDocument({ data: new Uint8Array(exported), isEvalSupported: false }).promise;
+  const text = (await (await pdf.getPage(1)).getTextContent()).items.map(item => item.str || '').join('');
+  expect(text).toContain('Synthetic imported garden');
+  expect(text).not.toContain('PRIVATE_');
+  await pdf.destroy();
+});
+
+test('unsupported selected glyphs are an explicit export error, not silent missing text', async ({ page }) => {
+  await setup(page);
+  await createVisit(page, 'SYNTHETIC unsupported glyph');
+  await addNote(page, 'Original broom 🧹');
+  await page.locator('input[name^=visible-]').check();
+  await page.locator('button[value=preview]').click();
+  await expect(page.locator('#feedback')).toContainText('this PDF font cannot display');
+  await expect(page.locator('#edit-visit')).toBeVisible();
+  await expect(page.locator('#download-pdf')).toHaveCount(0);
+  expect((await records(page))[0].notes[0].originalText).toBe('Original broom 🧹');
+  await page.locator('textarea[name^=note-]').fill('Client copy: path swept');
+  await page.locator('button[value=preview]').click();
+  await expect(page.locator('.pdf-page')).toBeVisible();
+  expect((await records(page))[0].notes[0].originalText).toBe('Original broom 🧹');
 });

@@ -1,5 +1,6 @@
 .tools/
 node_modules/
+src/vendor/
 dist/
 test-results/
 *.local

@@ -3,13 +3,15 @@ import { translator } from './i18n.js';
 import { LocalStore } from './storage.js';
 import { importPhoto } from './photos.js';
 import { renderReport } from './pdf.js';
+import { formatDate, formatNumber } from './format.js';
 
 const root = document.querySelector('#app');
 const store = new LocalStore();
 const state = { settings: null, visits: [], visit: null, screen: 'home', dirty: false, busy: false, pdf: null, report: null, offline: 'offlinePending', storageStatus: 'persistenceUnknown', usage: null };
 let t = translator('en');
 const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
-const date = value => new Intl.DateTimeFormat(state.settings?.language || 'en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+const date = value => formatDate(value, state.settings?.language || 'en');
+const number = (value, options = {}) => formatNumber(value, state.settings?.language || 'en', options);
 const button = (text, attrs = '', kind = 'secondary') => `<button class="${kind}" ${attrs}>${escape(text)}</button>`;
 const label = (key, control) => `<label>${escape(t(key))}${control}</label>`;
 const languages = language => `<select name="language" id="language">${LANGUAGES.map(code => `<option value="${code}" ${code === language ? 'selected' : ''}>${escape(LANGUAGE_NAMES[code])}</option>`).join('')}</select>`;
@@ -19,6 +21,7 @@ const notice = (text, kind = '') => `<p class="notice ${kind}">${escape(text)}</
 
 function frame(content) {
   document.documentElement.lang = state.settings?.language || document.documentElement.lang;
+  document.title = `ArbeitMgmt · ${t('reportTitle')}`;
   root.innerHTML = `
     <header class="topbar"><a class="brand" href="#" data-route="home"><img src="/icon.svg" width="36" height="36" alt="">Arbeit<span>Mgmt</span></a>
       ${state.settings ? `<nav aria-label="${escape(t('visits'))}">${button(t('visits'), 'data-route="home"')}${button(t('settings'), 'data-route="settings"')}</nav>` : ''}
@@ -58,7 +61,7 @@ async function run(action, form) {
   try { await action(); }
   catch (error) {
     console.error('ArbeitMgmt action failed:', error.name, error.message);
-    const known = ['invalidReference', 'invalidNote', 'invalidPhoto', 'invalidBackup', 'limitReached', 'conflict', 'databaseBlocked', 'storageUnavailable', 'pdfFailed'];
+    const known = ['invalidReference', 'invalidNote', 'invalidPhoto', 'invalidBackup', 'limitReached', 'conflict', 'databaseBlocked', 'storageUnavailable', 'pdfFailed', 'captionRequired', 'unsupportedPdfText'];
     feedback(t(known.includes(error.message) ? error.message : 'saveFailed'), true);
   } finally {
     state.busy = false;
@@ -82,7 +85,7 @@ async function navigate(screen) {
 function setup(language = 'en') {
   t = translator(language);
   document.documentElement.lang = language;
-  frame(`<section class="setup"><div class="eyebrow">QUICK VISIT REPORT</div><h1>${escape(t('setupTitle'))}</h1><p class="lead">${escape(t('setupBody'))}</p>
+  frame(`<section class="setup"><div class="eyebrow">${escape(t('quickReport'))}</div><h1>${escape(t('setupTitle'))}</h1><p class="lead">${escape(t('setupBody'))}</p>
     <form id="setup">${label('language', languages(language))}<p class="hint">${escape(t('languageHelp'))}</p>
     ${notice(t('localWarning'))}${notice(t('trialTerms'))}
     ${button(t('start'), 'type="submit"', 'primary')}</form>
@@ -102,12 +105,12 @@ function setup(language = 'en') {
 function home() {
   const trial = trialStatus(state.settings.trialStartedAt);
   const total = state.visits.length;
-  frame(`<section class="page-heading"><div><p class="eyebrow">QUICK VISIT REPORT</p><h1>${escape(t('visits'))}</h1><p>${total} ${escape(t('recordCount').toLocaleLowerCase(state.settings.language))} · ${escape(trial.active ? `${t('trialActive')}: ${trial.daysLeft}` : t('trialExpired'))}</p></div>
+  frame(`<section class="page-heading"><div><p class="eyebrow">${escape(t('quickReport'))}</p><h1>${escape(t('visits'))}</h1><p>${escape(t('recordCount'))}: ${number(total)} · ${escape(trial.active ? `${t('trialActive')}: ${number(trial.daysLeft)}` : t('trialExpired'))}</p></div>
     ${button(t('newVisit'), `id="new-visit" ${trial.active ? '' : 'disabled'}`, 'primary')}</section>
     ${notice(t('localWarning'))}
     <section class="visit-list">${total ? state.visits.map(v => {
       const items = [...v.notes, ...v.photos];
-      return `<button class="visit-card" data-visit="${v.id}"><span class="visit-icon" aria-hidden="true">↗</span><span><strong>${escape(v.reference)}</strong><small>${escape(v.client || v.site || date(v.createdAt))}</small><small>${escape(t('updated'))}: ${escape(date(v.updatedAt))} · ${escape(t('revision'))} ${v.revision}</small></span><span class="counts">${items.filter(n => n.visibility === 'client').length} ${escape(t('includedCount'))}</span></button>`;
+      return `<button class="visit-card" data-visit="${v.id}"><span class="visit-icon" aria-hidden="true">↗</span><span><strong>${escape(v.reference)}</strong><small>${escape(v.client || v.site || date(v.createdAt))}</small><small>${escape(t('updated'))}: ${escape(date(v.updatedAt))} · ${escape(t('revision'))} ${number(v.revision)}</small></span><span class="counts">${escape(t('includedCount'))}: ${number(items.filter(n => n.visibility === 'client').length)}</span></button>`;
     }).join('') : `<div class="empty"><div class="empty-mark" aria-hidden="true">✓</div><h2>${escape(t('emptyTitle'))}</h2><p>${escape(t('emptyBody'))}</p></div>`}</section>`);
   document.querySelector('#new-visit').addEventListener('click', () => { if (!state.busy) createScreen(); });
   root.querySelectorAll('[data-visit]').forEach(element => element.addEventListener('click', () => run(async () => {
@@ -150,15 +153,15 @@ function history(note) {
 function editScreen() {
   const v = state.visit;
   const items = [...v.notes, ...v.photos];
-  frame(`${button(t('back'), 'data-route="home"', 'text-button')}<section class="page-heading"><div><h1>${escape(v.reference)}</h1><p>${escape(t('revision'))} ${v.revision} · ${escape(t('updated'))}: ${escape(date(v.updatedAt))}</p></div><span class="saved">${escape(t('saved'))}</span></section>
-    <div class="metrics"><span>${items.filter(i => i.visibility === 'internal').length} ${escape(t('privateCount'))}</span><span>${items.filter(i => i.visibility === 'client').length} ${escape(t('includedCount'))}</span></div>
+  frame(`${button(t('back'), 'data-route="home"', 'text-button')}<section class="page-heading"><div><h1>${escape(v.reference)}</h1><p>${escape(t('revision'))} ${number(v.revision)} · ${escape(t('updated'))}: ${escape(date(v.updatedAt))}</p></div><span class="saved">${escape(t('saved'))}</span></section>
+    <div class="metrics"><span>${escape(t('privateCount'))}: ${number(items.filter(i => i.visibility === 'internal').length)}</span><span>${escape(t('includedCount'))}: ${number(items.filter(i => i.visibility === 'client').length)}</span></div>
     <form id="edit-visit"><section class="card metadata">
       ${label('reference', `<input name="reference" maxlength="120" required value="${escape(v.reference)}">`)}
       ${label('client', `<input name="client" maxlength="200" value="${escape(v.client)}">`)}
       ${label('site', `<input name="site" maxlength="300" value="${escape(v.site)}">`)}
     </section>
     ${notice(t('noteHint'))}
-    <section><h2>${escape(t('note'))} <span class="muted">${v.notes.length}/${LIMITS.items}</span></h2>
+    <section><h2>${escape(t('note'))} <span class="muted">${number(v.notes.length)}/${number(LIMITS.items)}</span></h2>
       ${v.notes.length ? v.notes.map(n => `<article class="card item">
         <div class="item-top"><span class="badge ${n.visibility === 'client' ? 'included' : ''}">${escape(t(n.visibility === 'client' ? 'clientVisible' : 'internal'))}</span>
           ${button(t('remove'), `type="submit" name="intent" value="remove-note:${n.id}"`, 'text-button danger')}</div>
@@ -171,7 +174,7 @@ function editScreen() {
         ${button(t('addNote'), `type="submit" name="intent" value="add-note" ${v.notes.length >= LIMITS.items ? 'disabled' : ''}`)}
       </article>
     </section>
-    <section><h2>${escape(t('photos'))} <span class="muted">${v.photos.length}/${LIMITS.items}</span></h2><p class="hint">${escape(t('photoHelp'))}</p>
+    <section><h2>${escape(t('photos'))} <span class="muted">${number(v.photos.length)}/${number(LIMITS.items)}</span></h2><p class="hint">${escape(t('photoHelp'))}</p>
       <div class="photo-grid">${v.photos.map(p => `<article class="card item photo-card">
         <img src="${p.reportImage}" alt="${escape(p.caption || t('photos'))}" loading="lazy">
         <span class="badge ${p.visibility === 'client' ? 'included' : ''}">${escape(t(p.visibility === 'client' ? 'clientVisible' : 'internal'))}</span>
@@ -235,7 +238,10 @@ async function saveEditor(form, intent) {
 async function previewScreen() {
   state.report = clientReport(state.visit, state.settings.language);
   try { state.pdf = await renderReport(state.report); }
-  catch (error) { console.error('PDF rendering failed:', error.name, error.message); throw new Error('pdfFailed'); }
+  catch (error) {
+    console.error('PDF rendering failed:', error.name, error.message);
+    throw new Error(['captionRequired', 'unsupportedPdfText'].includes(error.message) ? error.message : 'pdfFailed');
+  }
   state.screen = 'preview';
   const report = state.report;
   const canShare = typeof navigator.share === 'function' && typeof navigator.canShare === 'function' && navigator.canShare({ files: [pdfFile()] });
@@ -244,9 +250,9 @@ async function previewScreen() {
     <div class="actions">${button(t('downloadPdf'), 'id="download-pdf"', 'primary')}${button(t('sharePdf'), `id="share-pdf" ${canShare ? '' : 'disabled'}`)}</div>
     ${!canShare ? `<p class="hint">${escape(t('shareUnsupported'))}</p>` : ''}
     <p class="hint">${escape(t('pdfHelp'))}</p>
-    <section class="preview-pages">${state.pdf.pages.map((page, i) => `<img class="pdf-page" src="${page}" alt="${escape(t('page'))} ${i + 1}">`).join('')}</section>
+    <section class="preview-pages">${state.pdf.pages.map((page, i) => `<img class="pdf-page" src="${page}" alt="${escape(t('page'))} ${number(i + 1)}">`).join('')}</section>
     <details><summary>${escape(t('textReport'))}</summary><div class="transcript"><h2>${escape(report.reference)}</h2><p>${escape(report.client)}<br>${escape(report.site)}</p>
-      <p>${escape(t('created'))}: ${escape(date(report.createdAt))}<br>${escape(t('updated'))}: ${escape(date(report.updatedAt))} · ${escape(t('revision'))} ${report.revision}</p>
+      <p>${escape(t('created'))}: ${escape(date(report.createdAt))}<br>${escape(t('updated'))}: ${escape(date(report.updatedAt))} · ${escape(t('revision'))} ${number(report.revision)}</p>
       ${CATEGORIES.map(c => report.notes.some(n => n.category === c) ? `<h3>${escape(t(c))}</h3>${report.notes.filter(n => n.category === c).map(n => `<p class="preserve">${escape(n.text)}</p>`).join('')}` : '').join('')}
       ${report.photos.map(p => `<figure><img src="${p.image}" alt="${escape(p.caption || t('photos'))}"><figcaption>${escape(p.caption)}</figcaption></figure>`).join('')}<p>${escape(t('reportDisclaimer'))}</p></div></details>`);
   document.querySelector('#back-editor').addEventListener('click', () => { if (!state.busy) { state.pdf = null; state.report = null; state.screen = 'edit'; editScreen(); } });
@@ -286,9 +292,9 @@ async function settingsScreen() {
       <hr><p>${escape(t('restoreHelp'))}</p>${label('restore', '<input id="restore" type="file" accept=".json,application/json">')}
       <hr><p>${escape(t('persistenceHelp'))}</p>${button(t('persistence'), `id="persistence" ${navigator.storage?.persist ? '' : 'disabled'}`)}
       <p id="storage-status" class="hint">${escape(t(state.storageStatus))}</p>
-      ${state.usage ? `<p class="hint">${escape(t('storageUsage'))}: ${(state.usage.usage / 1048576).toFixed(1)} MB / ${(state.usage.quota / 1048576).toFixed(0)} MB</p>` : ''}
+      ${state.usage ? `<p class="hint">${escape(t('storageUsage'))}: ${number(state.usage.usage / 1048576, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MB / ${number(state.usage.quota / 1048576, { maximumFractionDigits: 0 })} MB</p>` : ''}
     </section>
-    <section class="card"><h2>${escape(t('plan'))}</h2><p>${escape(trial.active ? `${t('trialActive')}: ${trial.daysLeft}` : t('trialExpired'))}</p><p>${escape(t('trialTerms'))}</p>${notice(t('billingUnavailable'))}</section>
+    <section class="card"><h2>${escape(t('plan'))}</h2><p>${escape(trial.active ? `${t('trialActive')}: ${number(trial.daysLeft)}` : t('trialExpired'))}</p><p>${escape(t('trialTerms'))}</p>${notice(t('billingUnavailable'))}</section>
     <section class="card"><h2>${escape(t('privacy'))}</h2><p>${escape(t('privacyText'))}</p><p>${escape(t('legalText'))}</p></section>
     <section class="card">${button(t('erase'), 'id="erase"', 'danger secondary')}</section>`);
   document.querySelector('#language-settings').addEventListener('submit', event => {

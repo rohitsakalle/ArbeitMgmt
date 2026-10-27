@@ -1,131 +1,132 @@
 import { CATEGORIES } from './model.js';
 import { translator } from './i18n.js';
+import { formatDate, formatNumber } from './format.js';
+import { reportPhotoCopy } from './photos.js';
 
-export const PAGE = Object.freeze({ width: 1240, height: 1754, margin: 88 });
-const encoder = new TextEncoder();
+export const PAGE = Object.freeze({ width: 1240, maxPages: 200 });
 
-// Each PDF page embeds only the exact raster shown in the preview: no text layer, attachments or EXIF.
-export function encodePdf(pages) {
-  if (!Array.isArray(pages) || !pages.length || pages.length > 200) throw new Error('pdfFailed');
-  const chunks = [];
-  const offsets = [0];
-  let length = 0;
-  const push = value => {
-    const bytes = typeof value === 'string' ? encoder.encode(value) : value;
-    chunks.push(bytes); length += bytes.length;
-  };
-  const object = (number, parts) => {
-    offsets[number] = length;
-    push(`${number} 0 obj\n`);
-    parts.forEach(push);
-    push('\nendobj\n');
-  };
-  push('%PDF-1.4\n%ArbeitMgmt\n');
-  object(1, ['<< /Type /Catalog /Pages 2 0 R >>']);
-  object(2, [`<< /Type /Pages /Count ${pages.length} /Kids [${pages.map((_, i) => `${3 + i * 3} 0 R`).join(' ')}] >>`]);
-  pages.forEach((page, i) => {
-    if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(page)) throw new Error('pdfFailed');
-    const binary = atob(page.split(',')[1]);
-    const image = Uint8Array.from(binary, c => c.charCodeAt(0));
-    const number = 3 + i * 3;
-    const stream = 'q\n595.28 0 0 841.89 0 0 cm\n/Img Do\nQ\n';
-    object(number, [`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Img ${number + 1} 0 R >> >> /Contents ${number + 2} 0 R >>`]);
-    object(number + 1, [`<< /Type /XObject /Subtype /Image /Width ${PAGE.width} /Height ${PAGE.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.length} >>\nstream\n`, image, '\nendstream']);
-    object(number + 2, [`<< /Length ${encoder.encode(stream).length} >>\nstream\n${stream}endstream`]);
-  });
-  const xref = length;
-  push(`xref\n0 ${offsets.length}\n0000000000 65535 f \n`);
-  offsets.slice(1).forEach(offset => push(`${String(offset).padStart(10, '0')} 00000 n \n`));
-  push(`trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
-  return new Blob(chunks, { type: 'application/pdf' });
+export function validateReportText(report, supportedCodePoints) {
+  const values = [report.reference, report.client, report.site, ...report.notes.map(n => n.text), ...report.photos.map(p => p.caption)];
+  for (const value of values) {
+    for (const char of value) {
+      if (!/[\n\r\t]/u.test(char) && !supportedCodePoints.has(char.codePointAt(0))) throw new Error('unsupportedPdfText');
+    }
+  }
 }
 
-export async function renderReport(report) {
+// Build only from clientReport's allowlist, never from a stored visit or imported document definition.
+export function reportDefinition(report) {
   const t = translator(report.language);
-  const { width, height, margin } = PAGE;
-  const bottom = height - 130;
-  const pages = [];
-  let canvas, ctx, y;
-  function startPage() {
-    if (canvas) finishPage();
-    if (pages.length >= 199) throw new Error('pdfFailed');
-    canvas = document.createElement('canvas');
-    canvas.width = width; canvas.height = height;
-    ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('pdfFailed');
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = '#163e37'; ctx.fillRect(0, 0, width, 18);
-    ctx.textBaseline = 'top';
-    ctx.font = 'bold 24px Arial, sans-serif';
-    ctx.fillText('ArbeitMgmt', margin, 55);
-    ctx.fillStyle = '#53665e'; ctx.font = '20px Arial, sans-serif';
-    ctx.fillText(t('reportTitle'), margin, 88);
-    y = 145;
-  }
-  function finishPage() {
-    ctx.fillStyle = '#64736a'; ctx.font = '18px Arial, sans-serif';
-    ctx.fillText(`${t('page')} ${pages.length + 1}`, margin, height - 82);
-    ctx.fillText(t('reportDisclaimer'), margin, height - 54);
-    pages.push(canvas.toDataURL('image/jpeg', 0.93));
-    canvas.width = 0; canvas.height = 0;
-  }
-  function line(text, size, bold) {
-    if (y + size * 1.5 > bottom) startPage();
-    ctx.font = `${bold ? 'bold ' : ''}${size}px Arial, sans-serif`;
-    ctx.fillStyle = bold ? '#163e37' : '#233b32';
-    ctx.fillText(text, margin, y);
-    y += size * 1.5;
-  }
-  function text(value, size = 26, bold = false) {
-    // Break by grapheme so long references/words and Polish/Turkish/Romanian diacritics never clip.
-    const segmenter = new Intl.Segmenter(report.language, { granularity: 'grapheme' });
-    for (const paragraph of String(value).split(/\r?\n/)) {
-      ctx.font = `${bold ? 'bold ' : ''}${size}px Arial, sans-serif`;
-      let buffer = '';
-      for (const { segment } of segmenter.segment(paragraph)) {
-        if (ctx.measureText(buffer + segment).width > width - margin * 2 && buffer) {
-          line(buffer, size, bold); buffer = '';
-          ctx.font = `${bold ? 'bold ' : ''}${size}px Arial, sans-serif`;
-        }
-        buffer += segment;
-      }
-      line(buffer, size, bold);
-    }
-    y += 14;
-  }
-  startPage();
-  text(report.reference, 42, true);
-  if (report.client) text(`${t('client').split(' (')[0]}: ${report.client}`);
-  if (report.site) text(`${t('site').split(' (')[0]}: ${report.site}`);
-  const formatDate = value => new Intl.DateTimeFormat(report.language, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
-  text(`${t('created')}: ${formatDate(report.createdAt)}`, 20);
-  text(`${t('updated')}: ${formatDate(report.updatedAt)} · ${t('revision')}: ${report.revision}`, 20);
-  y += 16;
+  if (report.photos.some(p => !p.caption.trim())) throw new Error('captionRequired');
+  const content = [
+    { text: t('reportTitle'), style: 'title', margin: [0, 0, 0, 12] },
+    { text: report.reference, style: 'reference' },
+  ];
+  if (report.client) content.push({ text: `${t('clientLabel')}: ${report.client}`, margin: [0, 0, 0, 6] });
+  if (report.site) content.push({ text: `${t('siteLabel')}: ${report.site}`, margin: [0, 0, 0, 6] });
+  content.push(
+    { text: `${t('created')}: ${formatDate(report.createdAt, report.language)}`, style: 'small' },
+    { text: `${t('updated')}: ${formatDate(report.updatedAt, report.language)} · ${t('revision')}: ${formatNumber(report.revision, report.language)}`, style: 'small', margin: [0, 0, 0, 18] },
+  );
   for (const category of CATEGORIES) {
     const notes = report.notes.filter(n => n.category === category);
     if (!notes.length) continue;
-    if (y + 130 > bottom) startPage();
-    text(t(category), 30, true);
-    for (const note of notes) text(note.text);
+    content.push({ text: t(category), style: 'section', headlineLevel: 1 });
+    for (const note of notes) content.push({ text: note.text, margin: [0, 0, 0, 10] });
   }
-  if (report.photos.length) {
-    if (y + 180 > bottom) startPage();
-    text(t('photos'), 30, true);
+  if (report.photos.length) content.push({ text: t('photos'), style: 'section', headlineLevel: 1 });
+  report.photos.forEach((photo, index) => {
+    content.push({
+      // Caption precedes its image in the content stream as well as visually.
+      unbreakable: true,
+      stack: [
+        { text: `${t('photoLabel')} ${formatNumber(index + 1, report.language)}: ${photo.caption}`, margin: [0, 0, 0, 8] },
+        { image: photo.image, fit: [499, 310] },
+      ],
+      margin: [0, 4, 0, 18],
+    });
+  });
+  if (!report.notes.length && !report.photos.length) content.push({ text: t('reportEmpty') });
+  return {
+    pageSize: 'A4', pageMargins: [48, 62, 48, 70],
+    language: report.language, version: '1.7', tagged: false, displayTitle: true,
+    info: { title: t('reportTitle'), creator: 'ArbeitMgmt', producer: 'ArbeitMgmt / pdfmake' },
+    defaultStyle: { font: 'Roboto', fontSize: 11, lineHeight: 1.3, color: '#233b32' },
+    styles: {
+      title: { fontSize: 23, bold: true, color: '#163e37' },
+      reference: { fontSize: 16, bold: true, margin: [0, 0, 0, 14] },
+      section: { fontSize: 14, bold: true, color: '#163e37', margin: [0, 10, 0, 8] },
+      small: { fontSize: 9, color: '#53665e', margin: [0, 0, 0, 6] },
+    },
+    header: { text: 'ArbeitMgmt', bold: true, fontSize: 10, color: '#163e37', margin: [48, 28, 48, 0] },
+    footer: current => ({
+      stack: [
+        { text: `${t('page')} ${formatNumber(current, report.language)}`, margin: [0, 0, 0, 4] },
+        { text: t('reportDisclaimer') },
+      ],
+      fontSize: 8, color: '#53665e', margin: [48, 16, 48, 0],
+    }),
+    pageBreakBefore: (current, following) => current.headlineLevel === 1 && following.length === 0,
+    content,
+  };
+}
+
+let runtime;
+async function loadRuntime() {
+  if (!runtime) {
+    runtime = (async () => {
+      await import('./vendor/pdfmake.min.js');
+      await import('./vendor/vfs_fonts.js');
+      const pdfjs = await import('./vendor/pdf.mjs');
+      const { supportedCodePoints } = await import('./vendor/font-coverage.js');
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdf.worker.mjs', import.meta.url).href;
+      if (!globalThis.pdfMake?.createPdf) throw new Error('pdfFailed');
+      return { pdfMake: globalThis.pdfMake, pdfjs, supportedCodePoints };
+    })().catch(error => { runtime = null; throw error; });
   }
-  for (const photo of report.photos) {
-    const image = new Image();
-    image.src = photo.image;
-    await image.decode();
-    if (!image.width || !image.height) throw new Error('pdfFailed');
-    const scale = Math.min((width - 2 * margin) / image.width, 760 / image.height);
-    const drawWidth = image.width * scale, drawHeight = image.height * scale;
-    if (y + drawHeight + 80 > bottom) startPage();
-    ctx.drawImage(image, margin, y, drawWidth, drawHeight);
-    y += drawHeight + 18;
-    if (photo.caption) text(photo.caption, 23);
-    y += 16;
-  }
-  if (!report.notes.length && !report.photos.length) text(t('reportEmpty'));
-  finishPage();
-  return { pages, blob: encodePdf(pages) };
+  return runtime;
+}
+
+export async function renderReport(report) {
+  if (report.photos.some(p => !p.caption.trim())) throw new Error('captionRequired');
+  const { pdfMake, pdfjs, supportedCodePoints } = await loadRuntime();
+  validateReportText(report, supportedCodePoints);
+  const photos = [];
+  // Restore files can contain source metadata even in a nominal "reportImage"; strip it again at export.
+  for (const photo of report.photos) photos.push({ image: await reportPhotoCopy(photo.image), caption: photo.caption });
+  report = { ...report, photos };
+  const definition = reportDefinition(report);
+  const bytes = await new Promise((resolve, reject) => {
+    const chunks = [];
+    // getStream is synchronous for embedded fonts and data-URL images, so layout/font errors reject here.
+    const stream = pdfMake.createPdf(definition).getStream();
+    stream.on('data', chunk => chunks.push(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(new Blob(chunks, { type: 'application/pdf' }).arrayBuffer()));
+    stream.end();
+  });
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  // Preview the actual generated PDF, not a second independently laid-out approximation.
+  const task = pdfjs.getDocument({ data: new Uint8Array(bytes), isEvalSupported: false, useSystemFonts: false });
+  let document;
+  try {
+    document = await task.promise;
+    if (document.numPages > PAGE.maxPages) throw new Error('pdfFailed');
+    const pages = [];
+    for (let i = 1; i <= document.numPages; i++) {
+      const page = await document.getPage(i);
+      const natural = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: PAGE.width / natural.width });
+      const canvas = globalThis.document.createElement('canvas');
+      canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('pdfFailed');
+      try {
+        await page.render({ canvasContext: context, viewport }).promise;
+        pages.push(canvas.toDataURL('image/png'));
+      } finally { canvas.width = 0; canvas.height = 0; }
+      page.cleanup();
+    }
+    return { pages, blob };
+  } finally { await task.destroy(); }
 }

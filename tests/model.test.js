@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LANGUAGES, CATEGORIES, newVisit, newNote, updateNote, clientReport, trialStatus, validateBackup } from '../src/model.js';
 import { messages, translator } from '../src/i18n.js';
-import { encodePdf } from '../src/pdf.js';
+import { reportDefinition } from '../src/pdf.js';
+import { formatNumber, formatPrice, formatDate } from '../src/format.js';
 
 const now = '2026-10-27T10:00:00.000Z';
 const settings = { language: 'en', trialStartedAt: now, lastBackupAt: null };
@@ -54,7 +55,13 @@ test('five complete UI/template languages with Polish, Turkish and Romanian Unic
   const keys = Object.keys(messages.en).sort();
   for (const language of LANGUAGES) {
     assert.deepEqual(Object.keys(messages[language]).sort(), keys, language);
-    for (const key of keys) assert.equal(typeof translator(language)(key), 'string');
+    for (const key of keys) {
+      const value = translator(language)(key);
+      assert.equal(typeof value, 'string');
+      assert(value.trim(), `${language}.${key} is empty`);
+      assert(!/\{[^}]*\}/.test(value), `${language}.${key} has an unresolved placeholder`);
+      assert(!value.includes('\uFFFD'), `${language}.${key} contains replacement characters`);
+    }
     for (const category of CATEGORIES) assert(translator(language)(category));
   }
   assert(messages.pl.language.includes('ę'));
@@ -112,21 +119,45 @@ test('imported note and photo IDs cannot alias a visibility checkbox', () => {
   assert.throws(() => validateBackup(input), /invalidBackup/);
 });
 
-test('PDF offsets and stream lengths are byte-exact and metadata-free', async () => {
-  const image = 'data:image/jpeg;base64,/9j/2Q==';
-  const blob = encodePdf([image, image]);
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const text = new TextDecoder().decode(bytes);
-  assert(text.startsWith('%PDF-1.4'));
-  assert(text.includes('/Count 2'));
-  for (const forbidden of ['/EmbeddedFiles', '/Metadata', '/Info', '/JavaScript', '/Annots']) assert(!text.includes(forbidden));
-  const offset = Number(text.match(/startxref\n(\d+)/)[1]);
-  assert.equal(new TextDecoder().decode(bytes.slice(offset, offset + 4)), 'xref');
-  const xref = text.slice(text.indexOf('xref\n')).split('\n');
-  for (let i = 1; i <= 8; i++) {
-    const at = Number(xref[i + 2].slice(0, 10));
-    assert(new TextDecoder().decode(bytes.slice(at, at + 20)).startsWith(`${i} 0 obj\n`));
+test('locale formatting uses real currency/date/number rules without rewriting user content', () => {
+  for (const language of LANGUAGES) {
+    assert.equal(formatPrice(language), new Intl.NumberFormat(language, { style: 'currency', currency: 'EUR' }).format(2.99));
+    assert(translator(language)('trialTerms').includes(formatPrice(language)));
+    assert.equal(formatNumber(1234.5, language), new Intl.NumberFormat(language).format(1234.5));
+    assert.equal(formatDate(now, language), new Intl.DateTimeFormat(language, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(now)));
   }
-  assert.throws(() => encodePdf([]), /pdfFailed/);
-  assert.throws(() => encodePdf(['data:image/svg+xml,bad']), /pdfFailed/);
+  assert(formatPrice('de-AT').includes('2,99'));
+  assert(formatPrice('pl').includes('2,99'));
+  assert(formatPrice('tr').includes('2,99'));
+  assert(formatPrice('ro').includes('2,99'));
+  assert.throws(() => formatDate('bad', 'en'), /invalidDate/);
+  assert.throws(() => formatNumber(1, 'xx'), /invalidLanguage/);
+});
+
+test('PDF definition has logical text order, separate report labels and only static metadata', () => {
+  const visit = newVisit('SYNTHETIC Łódź İstanbul', { client: 'Synthetic client', site: 'Synthetic site' }, now);
+  visit.notes.push(updateNote(newNote('PRIVATE ORIGINAL', 'completed', now), 'Client work', 'completed', 'client'));
+  visit.notes.push(newNote('PRIVATE NOTE', 'outstanding', now));
+  visit.photos.push({ visibility: 'client', reportImage: 'data:image/jpeg;base64,/9j/2Q==', caption: 'Synthetic garden after cleaning', originalData: 'PRIVATE ORIGINAL IMAGE' });
+  const definition = reportDefinition(clientReport(visit, 'de-AT'));
+  assert(!JSON.stringify(definition).includes('PRIVATE'));
+  assert.equal(definition.language, 'de-AT');
+  assert.equal(definition.tagged, false);
+  assert.equal(definition.defaultStyle.font, 'Roboto');
+  assert.deepEqual(definition.info, { title: 'Besuchsbericht', creator: 'ArbeitMgmt', producer: 'ArbeitMgmt / pdfmake' });
+  assert(definition.content.find(item => item.text === 'Kunde: Synthetic client'));
+  const photo = definition.content.find(item => item.stack);
+  assert.equal(photo.stack[0].text, 'Foto 1: Synthetic garden after cleaning');
+  assert(photo.stack[1].image.startsWith('data:image/jpeg'));
+  const texts = definition.content.filter(item => item.text).map(item => item.text);
+  assert(texts.indexOf('Erledigte Arbeiten') < texts.indexOf('Client work'));
+  assert(texts.indexOf('Client work') < texts.indexOf('Fotos'));
+});
+
+test('client photo export requires a nonblank description, not a fabricated fallback', () => {
+  const visit = newVisit('SYNTHETIC caption', {}, now);
+  visit.photos.push({ visibility: 'client', reportImage: 'data:image/jpeg;base64,/9j/2Q==', caption: '   ' });
+  assert.throws(() => reportDefinition(clientReport(visit, 'en')), /captionRequired/);
+  visit.photos[0].visibility = 'internal';
+  assert.doesNotThrow(() => reportDefinition(clientReport(visit, 'en')));
 });

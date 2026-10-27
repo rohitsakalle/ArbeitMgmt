@@ -8,8 +8,18 @@ export async function importPhoto(file) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+  const reportImage = await reportPhotoCopy(originalData);
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(), reportImage, originalData, originalName: file.name.slice(0, 255),
+    originalType: file.type, caption: '', visibility: 'internal', createdAt: now, updatedAt: now, history: [],
+  };
+}
+
+export async function reportPhotoCopy(data) {
+  if (typeof data !== 'string' || data.length > LIMITS.imageBytes * 1.4 || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(data)) throw new Error('invalidPhoto');
   const image = new Image();
-  image.src = originalData;
+  image.src = data;
   try { await image.decode(); } catch { throw new Error('invalidPhoto'); }
   if (!image.width || !image.height || image.width * image.height > 40_000_000) throw new Error('invalidPhoto');
   const scale = Math.min(1, 1800 / Math.max(image.width, image.height));
@@ -22,10 +32,7 @@ export async function importPhoto(file) {
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
   const reportImage = canvas.toDataURL('image/jpeg', 0.88);
+  canvas.width = 0; canvas.height = 0;
   if (!reportImage.startsWith('data:image/jpeg;base64,')) throw new Error('invalidPhoto');
-  const now = new Date().toISOString();
-  return {
-    id: crypto.randomUUID(), reportImage, originalData, originalName: file.name.slice(0, 255),
-    originalType: file.type, caption: '', visibility: 'internal', createdAt: now, updatedAt: now, history: [],
-  };
+  return reportImage;
 }
