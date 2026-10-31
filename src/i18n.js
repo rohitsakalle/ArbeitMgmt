@@ -249,11 +249,95 @@ export const messages = {
   },
 };
 
-export function translator(language = 'en') {
+export const nativeMessages = {
+  en: {
+    localWarning: 'Records stay in this Android app, separately from browser records. Uninstalling, clearing app data or losing this device can erase them. Export private backups to a secure location. There is no cloud archive or automatic Android backup.',
+    installHelp: 'Android debug beta, not a Play Store release. Packaged capture and PDF assets work offline. Use Save changes before switching apps: unsaved typing can be lost when Android closes the process. Photo capture saves typed edits first; unfinished photo import is recoverable on relaunch.',
+    persistenceHelp: 'Saved records use atomic app-private files, not browser storage. Save confirmation means the local write completed; it is not a backup. App data is not encrypted by ArbeitMgmt.',
+    persistenceUnknown: 'App-private local records. Regular external backups are essential.',
+    privacyText: 'No analytics, ads, account, cloud upload or location/microphone permission. Records and original photos are in app-private storage, not encrypted by this app. Android file/camera apps receive only the access needed for the action you choose. PDF sharing grants temporary read access to that report only. Check recipients and photo contents. Shared temporary copies are cleaned on a later launch after 24 hours; recipient copies cannot be recalled.',
+    billingUnavailable: 'Purchasing is not connected; no payment is collected. Local trial dates are not secure entitlement enforcement. A production Play digital subscription requires Play Billing and reviewed entitlements; this debug beta must not be sold.',
+    backupConfirm: 'Save an unencrypted backup containing ALL private data and original photos to a location you choose?',
+    backupReady: 'Backup saved through the Android file provider. Keep it private and verify a restore before relying on it.',
+    lastBackup: 'Last backup save completed',
+    downloadStarted: 'File saved through the Android file provider. Check the chosen location.',
+    shareDone: 'Android share chooser opened for this PDF. Delivery to a recipient is not confirmed.',
+    storageUnavailable: 'App-private records could not be opened. Do not clear app data. Keep an existing backup safe and retry.',
+    nativeFailed: 'The Android operation failed or access was denied. No successful save, import or delivery is confirmed. Retry, or use another file/camera app.',
+    interruptedPhoto: 'A photo import is unfinished. Discard its pending copy? Already saved visit records will stay unchanged.',
+  },
+  'de-AT': {
+    localWarning: 'Daten bleiben in dieser Android-App, getrennt von Browserdaten. Deinstallation, Löschen der App-Daten oder Geräteverlust können sie löschen. Private Sicherungen an einen sicheren Ort exportieren. Kein Cloud-Archiv und keine automatische Android-Sicherung.',
+    installHelp: 'Android-Debug-Beta, keine Play-Store-Veröffentlichung. Aufnahme und PDF-Dateien sind offline verfügbar. Vor einem App-Wechsel Änderungen speichern: Android kann ungespeicherte Eingaben beim Beenden verlieren. Fotoaufnahme speichert Eingaben zuerst; ein offener Fotoimport kann beim Neustart fortgesetzt werden.',
+    persistenceHelp: 'Gespeicherte Daten liegen in atomar geschriebenen app-privaten Dateien, nicht im Browserspeicher. Die Speicherbestätigung ist keine Sicherung. ArbeitMgmt verschlüsselt die App-Daten nicht.',
+    persistenceUnknown: 'App-private lokale Daten. Regelmäßige externe Sicherungen sind nötig.',
+    privacyText: 'Keine Analyse, Werbung, Konten, Cloud-Uploads oder Standort-/Mikrofonberechtigung. Daten und Originalfotos liegen app-privat, ohne App-Verschlüsselung. Datei- und Kamera-Apps erhalten nur den nötigen Zugriff für Ihre Aktion. PDF-Teilen gewährt vorübergehend Lesezugriff nur auf diesen Bericht. Empfänger und Bildinhalte prüfen. Temporäre Kopien werden bei einem späteren Start nach 24 Stunden entfernt; Empfängerkopien können nicht zurückgerufen werden.',
+    billingUnavailable: 'Kauf nicht verbunden; keine Zahlung. Lokale Testdaten sind keine sichere Berechtigungsprüfung. Ein produktives digitales Play-Abo braucht Play Billing und geprüfte Berechtigungen. Diese Debug-Beta darf nicht als Abo verkauft werden.',
+    backupConfirm: 'Unverschlüsselte Sicherung mit ALLEN privaten Daten und Originalfotos an einem gewählten Ort speichern?',
+    backupReady: 'Sicherung über den Android-Dateianbieter gespeichert. Privat halten und eine Wiederherstellung prüfen.',
+    lastBackup: 'Letzte abgeschlossene Sicherung',
+    downloadStarted: 'Datei über den Android-Dateianbieter gespeichert. Gewählten Ort prüfen.',
+    shareDone: 'Android-Teilauswahl für dieses PDF geöffnet. Zustellung nicht bestätigt.',
+    storageUnavailable: 'App-private Daten konnten nicht geöffnet werden. App-Daten nicht löschen. Vorhandene Sicherung schützen und erneut versuchen.',
+    nativeFailed: 'Android-Aktion fehlgeschlagen oder Zugriff verweigert. Erfolgreiches Speichern, Importieren oder Zustellen ist nicht bestätigt. Erneut oder mit anderer Datei-/Kamera-App versuchen.',
+    interruptedPhoto: 'Ein Fotoimport ist offen. Zwischengespeicherte Kopie verwerfen? Gespeicherte Besuchsdaten bleiben unverändert.',
+  },
+  pl: {
+    localWarning: 'Dane pozostają w tej aplikacji Android, osobno od przeglądarki. Odinstalowanie, usunięcie danych aplikacji lub utrata urządzenia może je usunąć. Eksportuj prywatne kopie w bezpieczne miejsce. Brak chmury i automatycznej kopii Android.',
+    installHelp: 'Testowa wersja debug Android, nie publikacja w Play. Zasoby zdjęć i PDF działają offline. Zapisz zmiany przed przejściem do innej aplikacji: Android może zamknąć proces i utracić niezapisany tekst. Przed zdjęciem tekst jest zapisywany; niedokończony import można odzyskać po ponownym uruchomieniu.',
+    persistenceHelp: 'Dane są zapisywane atomowo w prywatnych plikach aplikacji, nie przeglądarki. Potwierdzenie zapisu nie jest kopią. ArbeitMgmt nie szyfruje danych aplikacji.',
+    persistenceUnknown: 'Prywatne dane lokalne aplikacji. Regularne kopie zewnętrzne są konieczne.',
+    privacyText: 'Bez analityki, reklam, konta, chmury i uprawnień lokalizacji/mikrofonu. Dane i oryginały zdjęć są prywatne dla aplikacji, bez jej szyfrowania. Aplikacje plików i aparatu otrzymują tylko dostęp potrzebny do wybranej czynności. PDF jest udostępniany przez tymczasowy odczyt tylko tego raportu. Sprawdź odbiorców i treść zdjęć. Pliki tymczasowe są usuwane przy późniejszym uruchomieniu po 24 godzinach; kopii odbiorcy nie można wycofać.',
+    billingUnavailable: 'Zakup nie jest podłączony; brak płatności. Lokalne daty testu nie są bezpieczną kontrolą uprawnień. Produkcyjna subskrypcja cyfrowa w Play wymaga Play Billing i kontroli uprawnień. Wersja debug nie może być sprzedawana jako abonament.',
+    backupConfirm: 'Zapisać niezaszyfrowaną kopię WSZYSTKICH prywatnych danych i oryginałów zdjęć w wybranym miejscu?',
+    backupReady: 'Kopia zapisana przez dostawcę plików Android. Zachowaj prywatność i sprawdź odtwarzanie.',
+    lastBackup: 'Ostatni ukończony zapis kopii',
+    downloadStarted: 'Plik zapisany przez dostawcę plików Android. Sprawdź wybrane miejsce.',
+    shareDone: 'Otwarto wybór udostępniania Android dla PDF. Doręczenie nie jest potwierdzone.',
+    storageUnavailable: 'Nie można otworzyć prywatnych danych aplikacji. Nie usuwaj danych aplikacji. Chroń kopię i spróbuj ponownie.',
+    nativeFailed: 'Operacja Android nie powiodła się lub odmówiono dostępu. Zapis, import ani doręczenie nie są potwierdzone. Spróbuj ponownie lub użyj innej aplikacji plików/aparatu.',
+    interruptedPhoto: 'Import zdjęcia jest niedokończony. Odrzucić oczekującą kopię? Zapisane wizyty pozostaną bez zmian.',
+  },
+  tr: {
+    localWarning: 'Kayıtlar tarayıcıdan ayrı olarak bu Android uygulamasında kalır. Uygulamayı kaldırmak, verilerini silmek veya cihazı kaybetmek kayıtları silebilir. Özel yedekleri güvenli bir konuma aktarın. Bulut arşivi ve otomatik Android yedeği yoktur.',
+    installHelp: 'Android debug beta; Play Store yayını değildir. Fotoğraf ve PDF kaynakları çevrimdışı çalışır. Uygulama değiştirmeden değişiklikleri kaydedin: Android süreci kapatırsa kaydedilmemiş yazılar kaybolabilir. Fotoğraf öncesi yazılar kaydedilir; yarım kalan içe aktarma yeniden açılışta kurtarılabilir.',
+    persistenceHelp: 'Kayıtlar tarayıcı yerine uygulamaya özel dosyalara atomik olarak yazılır. Kayıt onayı yedek değildir. ArbeitMgmt uygulama verilerini şifrelemez.',
+    persistenceUnknown: 'Uygulamaya özel yerel kayıtlar. Düzenli harici yedekler gereklidir.',
+    privacyText: 'Analitik, reklam, hesap, bulut yükleme ve konum/mikrofon izni yoktur. Kayıtlar ve özgün fotoğraflar uygulamaya özeldir; uygulama tarafından şifrelenmez. Dosya/kamera uygulamalarına yalnızca seçtiğiniz işlem için gereken erişim verilir. PDF paylaşımı yalnız bu rapora geçici okuma izni verir. Alıcıları ve fotoğraf içeriğini kontrol edin. Geçici kopyalar 24 saatten sonraki bir açılışta temizlenir; alıcı kopyaları geri alınamaz.',
+    billingUnavailable: 'Satın alma bağlı değildir; ödeme alınmaz. Yerel deneme tarihleri güvenli yetkilendirme değildir. Üretim Play dijital aboneliği Play Billing ve incelenmiş yetkiler gerektirir. Debug beta abonelik olarak satılmamalıdır.',
+    backupConfirm: 'TÜM özel veriler ve özgün fotoğraflar şifrelenmeden seçtiğiniz konuma yedeklensin mi?',
+    backupReady: 'Yedek Android dosya sağlayıcısıyla kaydedildi. Gizli tutun ve geri yüklemeyi doğrulayın.',
+    lastBackup: 'Tamamlanan son yedek kaydı',
+    downloadStarted: 'Dosya Android dosya sağlayıcısıyla kaydedildi. Seçilen konumu kontrol edin.',
+    shareDone: 'Bu PDF için Android paylaşım seçicisi açıldı. Alıcıya teslim doğrulanmadı.',
+    storageUnavailable: 'Uygulamaya özel kayıtlar açılamadı. Uygulama verilerini silmeyin. Mevcut yedeği koruyun ve yeniden deneyin.',
+    nativeFailed: 'Android işlemi başarısız oldu veya erişim reddedildi. Başarılı kayıt, içe aktarma ya da teslim doğrulanmadı. Yeniden veya başka dosya/kamera uygulamasıyla deneyin.',
+    interruptedPhoto: 'Fotoğraf aktarımı tamamlanmadı. Bekleyen kopya silinsin mi? Kaydedilmiş ziyaretler değişmez.',
+  },
+  ro: {
+    localWarning: 'Datele rămân în această aplicație Android, separat de browser. Dezinstalarea, ștergerea datelor sau pierderea dispozitivului le pot șterge. Exportă copii private într-un loc sigur. Fără arhivă cloud sau copie Android automată.',
+    installHelp: 'Beta debug Android, nu publicare în Play. Resursele pentru fotografii și PDF funcționează offline. Salvează înainte de schimbarea aplicației: Android poate închide procesul și pierde textul nesalvat. Fotografierea salvează textul întâi; importul neterminat poate fi recuperat la repornire.',
+    persistenceHelp: 'Datele sunt salvate atomic în fișiere private ale aplicației, nu în browser. Confirmarea salvării nu este o copie. ArbeitMgmt nu criptează datele aplicației.',
+    persistenceUnknown: 'Date locale private ale aplicației. Copiile externe regulate sunt esențiale.',
+    privacyText: 'Fără analiză, reclame, cont, încărcare cloud sau permisiuni de locație/microfon. Datele și fotografiile originale sunt private aplicației, fără criptare proprie. Aplicațiile de fișiere/cameră primesc doar accesul necesar acțiunii alese. Partajarea PDF oferă citire temporară doar pentru raport. Verifică destinatarii și imaginile. Copiile temporare se șterg la o pornire ulterioară după 24 de ore; copiile destinatarului nu pot fi retrase.',
+    billingUnavailable: 'Achiziția nu este conectată; nu se încasează bani. Datele locale ale perioadei de probă nu sunt autorizare sigură. Abonamentul digital Play de producție necesită Play Billing și autorizare verificată. Beta debug nu trebuie vândută ca abonament.',
+    backupConfirm: 'Salvezi o copie necriptată cu TOATE datele private și fotografiile originale într-un loc ales?',
+    backupReady: 'Copie salvată prin furnizorul de fișiere Android. Păstreaz-o privată și verifică restaurarea.',
+    lastBackup: 'Ultima salvare de copie finalizată',
+    downloadStarted: 'Fișier salvat prin furnizorul de fișiere Android. Verifică locul ales.',
+    shareDone: 'Selectorul Android de partajare PDF s-a deschis. Livrarea nu este confirmată.',
+    storageUnavailable: 'Datele private ale aplicației nu s-au deschis. Nu șterge datele aplicației. Protejează copia existentă și reîncearcă.',
+    nativeFailed: 'Operația Android a eșuat sau accesul a fost refuzat. Salvarea, importul sau livrarea nu sunt confirmate. Reîncearcă sau folosește altă aplicație de fișiere/cameră.',
+    interruptedPhoto: 'Importul fotografiei este neterminat. Ștergi copia în așteptare? Vizitele salvate rămân neschimbate.',
+  },
+};
+
+export function translator(language = 'en', android = false) {
   if (!LANGUAGES.includes(language)) throw new Error('invalidLanguage');
   const price = formatPrice(language);
   return key => {
-    if (!(key in messages[language])) throw new Error(`Missing translation: ${language}.${key}`);
-    return messages[language][key].replace('{price}', price);
+    const text = (android && nativeMessages[language][key]) || messages[language][key];
+    if (!text) throw new Error(`Missing translation: ${language}.${key}`);
+    return text.replace('{price}', price);
   };
 }

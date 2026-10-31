@@ -1,5 +1,6 @@
 const CACHE = 'arbeitmgmt-dev-v1';
 const FILES = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png', '/src/main.js', '/src/model.js', '/src/storage.js', '/src/i18n.js', '/src/format.js', '/src/photos.js', '/src/pdf.js', '/src/style.css',
+  '/src/platform.js', '/src/native-storage.js', '/src/vendor/capacitor.js',
   '/src/vendor/pdfmake.min.js', '/src/vendor/vfs_fonts.js', '/src/vendor/font-coverage.js', '/src/vendor/pdf.mjs', '/src/vendor/pdf.worker.mjs', '/src/vendor/pdfmake-LICENSE.txt', '/src/vendor/pdfjs-LICENSE.txt', '/src/vendor/Roboto-OFL.txt', '/src/vendor/THIRD-PARTY-NOTICES.txt'];
 
 self.addEventListener('install', event => {

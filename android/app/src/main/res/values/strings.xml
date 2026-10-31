@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ArbeitMgmt Beta</string>
+    <string name="title_activity_main">ArbeitMgmt Beta</string>
+    <string name="package_name">at.arbeitmgmt.beta</string>
+    <string name="custom_url_scheme">at.arbeitmgmt.beta</string>
+</resources>

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { LANGUAGES } from '../src/model.js';
-import { messages, translator } from '../src/i18n.js';
+import { messages, nativeMessages, translator } from '../src/i18n.js';
 import { validateReportText } from '../src/pdf.js';
 import { newVisit, newNote, updateNote, clientReport } from '../src/model.js';
 
@@ -16,6 +16,12 @@ test('bundled regular and bold fonts cover all five UI/templates and target-lang
   for (const language of LANGUAGES) {
     for (const key of Object.keys(messages[language])) {
       for (const char of translator(language)(key)) if (!/\s/u.test(char)) required.add(char);
+    }
+    assert.deepEqual(Object.keys(nativeMessages[language]).sort(), Object.keys(nativeMessages.en).sort());
+    for (const key of Object.keys(nativeMessages[language])) {
+      const text = translator(language, true)(key);
+      assert(text.length && !text.includes('\uFFFD') && !text.includes('{price}'));
+      for (const char of text) if (!/\s/u.test(char)) required.add(char);
     }
   }
   for (const name of ['Roboto-Regular.ttf', 'Roboto-Medium.ttf']) {

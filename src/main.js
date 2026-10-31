@@ -4,11 +4,13 @@ import { LocalStore } from './storage.js';
 import { importPhoto } from './photos.js';
 import { renderReport } from './pdf.js';
 import { formatDate, formatNumber } from './format.js';
+import { isAndroid, native, saveNativeFile } from './platform.js';
+import { NativeStore } from './native-storage.js';
 
 const root = document.querySelector('#app');
-const store = new LocalStore();
+const store = isAndroid ? new NativeStore(native) : new LocalStore();
 const state = { settings: null, visits: [], visit: null, screen: 'home', dirty: false, busy: false, pdf: null, report: null, offline: 'offlinePending', storageStatus: 'persistenceUnknown', usage: null };
-let t = translator('en');
+let t = translator('en', isAndroid);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 const date = value => formatDate(value, state.settings?.language || 'en');
 const number = (value, options = {}) => formatNumber(value, state.settings?.language || 'en', options);
@@ -61,7 +63,8 @@ async function run(action, form) {
   try { await action(); }
   catch (error) {
     console.error('ArbeitMgmt action failed:', error.name, error.message);
-    const known = ['invalidReference', 'invalidNote', 'invalidPhoto', 'invalidBackup', 'limitReached', 'conflict', 'databaseBlocked', 'storageUnavailable', 'pdfFailed', 'captionRequired', 'unsupportedPdfText'];
+    const known = ['invalidReference', 'invalidNote', 'invalidPhoto', 'invalidBackup', 'limitReached', 'conflict', 'databaseBlocked', 'storageUnavailable', 'pdfFailed', 'captionRequired', 'unsupportedPdfText', 'nativeFailed'];
+    if (error.code === 'CANCELLED') { feedback(t('shareCancelled')); return; }
     feedback(t(known.includes(error.message) ? error.message : 'saveFailed'), true);
   } finally {
     state.busy = false;
@@ -83,7 +86,7 @@ async function navigate(screen) {
 }
 
 function setup(language = 'en') {
-  t = translator(language);
+  t = translator(language, isAndroid);
   document.documentElement.lang = language;
   frame(`<section class="setup"><div class="eyebrow">${escape(t('quickReport'))}</div><h1>${escape(t('setupTitle'))}</h1><p class="lead">${escape(t('setupBody'))}</p>
     <form id="setup">${label('language', languages(language))}<p class="hint">${escape(t('languageHelp'))}</p>
@@ -180,13 +183,13 @@ function editScreen() {
         <span class="badge ${p.visibility === 'client' ? 'included' : ''}">${escape(t(p.visibility === 'client' ? 'clientVisible' : 'internal'))}</span>
         ${label('caption', `<textarea name="caption-${p.id}" maxlength="1000" rows="2">${escape(p.caption)}</textarea>`)}
         ${visible(`visible-${p.id}`, p.visibility)}
-        <details class="history"><summary>${escape(t('original'))}</summary><p>${escape(p.originalName)} · ${escape(date(p.createdAt))}</p><a download="${escape(p.originalName)}" href="${p.originalData}">${escape(p.originalName)}</a>
+        <details class="history"><summary>${escape(t('original'))}</summary><p>${escape(p.originalName)} · ${escape(date(p.createdAt))}</p><a data-original="${p.id}" download="${escape(p.originalName)}" href="${p.originalData}">${escape(p.originalName)}</a>
           ${p.history.map(h => `<p class="preserve">${escape(date(h.at))} · ${escape(t(h.visibility === 'client' ? 'clientVisible' : 'internal'))}<br>${escape(h.caption)}</p>`).join('')}</details>
         ${button(t('remove'), `type="submit" name="intent" value="remove-photo:${p.id}"`, 'text-button danger')}
       </article>`).join('')}</div>
       ${!v.photos.length ? `<p class="muted">${escape(t('noPhotos'))}</p>` : ''}
-      <div class="card">${label('addPhoto', '<input name="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple>')}
-        ${label('capturePhoto', '<input name="camera" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">')}</div>
+      <div class="card">${isAndroid ? `${button(t('addPhoto'), 'type="button" id="native-photo"')}${button(t('capturePhoto'), 'type="button" id="native-camera"')}` : `${label('addPhoto', '<input name="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple>')}
+        ${label('capturePhoto', '<input name="camera" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">')}`}</div>
     </section>
     <div class="sticky-actions">${button(t('save'), 'type="submit" name="intent" value="save"')}${button(t('preview'), 'type="submit" name="intent" value="preview"', 'primary')}</div>
     </form><div class="bottom-actions">${button(t('deleteVisit'), 'id="delete-visit"', 'text-button danger')}</div>`);
@@ -205,6 +208,54 @@ function editScreen() {
     if (!confirm(t('deleteConfirm'))) return;
     run(async () => { await store.deleteVisit(v); await navigate('home'); });
   });
+  if (isAndroid) {
+    for (const [id, camera] of [['native-photo', false], ['native-camera', true]]) {
+      document.getElementById(id).addEventListener('click', () => run(async () => {
+        // Commit typed edits before Android can reclaim this process in another activity.
+        await saveEditor(document.querySelector('#edit-visit'), 'save');
+        editScreen();
+        await native.pickPhoto({ camera, visitId: state.visit.id });
+        await recoverPhoto();
+      }));
+    }
+    root.querySelectorAll('[data-original]').forEach(anchor => anchor.addEventListener('click', event => {
+      event.preventDefault();
+      run(async () => {
+        const photo = state.visit.photos.find(p => p.id === anchor.dataset.original);
+        const bytes = Uint8Array.from(atob(photo.originalData.split(',')[1]), ch => ch.charCodeAt(0));
+        await saveNativeFile(new Blob([bytes], { type: photo.originalType }), photo.originalName);
+        feedback(t('downloadStarted'));
+      });
+    }));
+  }
+}
+
+async function recoverPhoto() {
+  const pending = await native.pendingPhoto();
+  if (pending.interrupted) {
+    if (confirm(t('interruptedPhoto'))) await native.discardPhoto();
+    return;
+  }
+  if (!pending.data) return;
+  const visit = (await store.visits()).find(v => v.id === pending.visitId);
+  if (!visit || visit.photos.length >= LIMITS.items) throw new Error('limitReached');
+  // The token makes recovery idempotent if the process dies after saving but before acknowledgement.
+  if (!visit.photos.some(p => p.id === pending.token)) {
+    const bytes = Uint8Array.from(atob(pending.data), ch => ch.charCodeAt(0));
+    let photo;
+    try { photo = await importPhoto(new File([bytes], pending.name, { type: pending.mime })); }
+    catch (error) {
+      if (confirm(t('interruptedPhoto'))) await native.discardPhoto();
+      throw error;
+    }
+    photo.id = pending.token;
+    const updated = { ...visit, photos: [...visit.photos, photo], revision: visit.revision + 1, updatedAt: new Date().toISOString() };
+    await store.saveVisit(updated, visit.revision);
+    state.visit = updated;
+  } else state.visit = visit;
+  await native.acknowledgePhoto({ token: pending.token });
+  state.screen = 'edit'; state.dirty = false;
+  editScreen(); feedback(t('saved'));
 }
 
 async function saveEditor(form, intent) {
@@ -244,7 +295,7 @@ async function previewScreen() {
   }
   state.screen = 'preview';
   const report = state.report;
-  const canShare = typeof navigator.share === 'function' && typeof navigator.canShare === 'function' && navigator.canShare({ files: [pdfFile()] });
+  const canShare = isAndroid || (typeof navigator.share === 'function' && typeof navigator.canShare === 'function' && navigator.canShare({ files: [pdfFile()] }));
   frame(`${button(t('back'), 'id="back-editor"', 'text-button')}<h1>${escape(t('previewTitle'))}</h1>${notice(t('previewHelp'))}
     ${!report.notes.length && !report.photos.length ? notice(t('noIncluded')) : ''}
     <div class="actions">${button(t('downloadPdf'), 'id="download-pdf"', 'primary')}${button(t('sharePdf'), `id="share-pdf" ${canShare ? '' : 'disabled'}`)}</div>
@@ -257,9 +308,13 @@ async function previewScreen() {
       ${report.photos.map(p => `<figure><img src="${p.image}" alt="${escape(p.caption || t('photos'))}"><figcaption>${escape(p.caption)}</figcaption></figure>`).join('')}<p>${escape(t('reportDisclaimer'))}</p></div></details>`);
   document.querySelector('#back-editor').addEventListener('click', () => { if (!state.busy) { state.pdf = null; state.report = null; state.screen = 'edit'; editScreen(); } });
   document.querySelector('#download-pdf').addEventListener('click', () => {
-    download(state.pdf.blob, pdfFile().name); feedback(t('downloadStarted'));
+    run(async () => { await download(state.pdf.blob, pdfFile().name); feedback(t('downloadStarted')); });
   });
   document.querySelector('#share-pdf').addEventListener('click', () => {
+    if (isAndroid) {
+      run(async () => { await saveNativeFile(state.pdf.blob, pdfFile().name, true); feedback(t('shareDone')); });
+      return;
+    }
     // Call directly from the gesture, not after PDF generation, to preserve transient activation.
     navigator.share({ files: [pdfFile()] }).then(() => feedback(t('shareDone'))).catch(error => {
       if (error.name === 'AbortError') feedback(t('shareCancelled'));
@@ -270,7 +325,8 @@ async function previewScreen() {
 }
 
 function pdfFile() { return new File([state.pdf.blob], `visit-report-${state.visit.createdAt.slice(0, 10)}-r${state.visit.revision}.pdf`, { type: 'application/pdf' }); }
-function download(blob, name) {
+async function download(blob, name) {
+  if (isAndroid) return saveNativeFile(blob, name);
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url; anchor.download = name;
@@ -279,24 +335,33 @@ function download(blob, name) {
 }
 
 async function settingsScreen() {
-  if (navigator.storage?.persisted) {
+  if (!isAndroid && navigator.storage?.persisted) {
     state.storageStatus = await navigator.storage.persisted() ? 'persistentGranted' : 'persistenceUnknown';
   }
-  if (navigator.storage?.estimate) state.usage = await navigator.storage.estimate();
+  if (!isAndroid && navigator.storage?.estimate) state.usage = await navigator.storage.estimate();
   const s = state.settings;
   const trial = trialStatus(s.trialStartedAt);
   frame(`<h1>${escape(t('settings'))}</h1><section class="card"><form id="language-settings">
     ${label('language', languages(s.language))}<p class="hint">${escape(t('languageHelp'))}</p>${button(t('save'), 'type="submit"')}</form></section>
     <section class="card"><h2>${escape(t('backup'))}</h2>${notice(t('localWarning'))}<p>${escape(t('installHelp'))}</p><p>${escape(t('backupHelp'))}</p>
       ${button(t('backup'), 'id="backup"', 'primary')}<p class="hint">${escape(t('lastBackup'))}: ${escape(s.lastBackupAt ? date(s.lastBackupAt) : t('never'))}</p>
-      <hr><p>${escape(t('restoreHelp'))}</p>${label('restore', '<input id="restore" type="file" accept=".json,application/json">')}
-      <hr><p>${escape(t('persistenceHelp'))}</p>${button(t('persistence'), `id="persistence" ${navigator.storage?.persist ? '' : 'disabled'}`)}
+      <hr><p>${escape(t('restoreHelp'))}</p>${isAndroid ? button(t('restore'), 'id="native-restore"') : label('restore', '<input id="restore" type="file" accept=".json,application/json">')}
+      <hr><p>${escape(t('persistenceHelp'))}</p>${!isAndroid ? button(t('persistence'), `id="persistence" ${navigator.storage?.persist ? '' : 'disabled'}`) : ''}
       <p id="storage-status" class="hint">${escape(t(state.storageStatus))}</p>
       ${state.usage ? `<p class="hint">${escape(t('storageUsage'))}: ${number(state.usage.usage / 1048576, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MB / ${number(state.usage.quota / 1048576, { maximumFractionDigits: 0 })} MB</p>` : ''}
     </section>
     <section class="card"><h2>${escape(t('plan'))}</h2><p>${escape(trial.active ? `${t('trialActive')}: ${number(trial.daysLeft)}` : t('trialExpired'))}</p><p>${escape(t('trialTerms'))}</p>${notice(t('billingUnavailable'))}</section>
     <section class="card"><h2>${escape(t('privacy'))}</h2><p>${escape(t('privacyText'))}</p><p>${escape(t('legalText'))}</p></section>
     <section class="card">${button(t('erase'), 'id="erase"', 'danger secondary')}</section>`);
+  if (isAndroid) {
+    const discard = document.createElement('button');
+    discard.className = 'secondary';
+    discard.textContent = t('interruptedPhoto');
+    discard.addEventListener('click', () => run(async () => {
+      if (confirm(t('removeConfirm'))) { await native.discardPhoto(); feedback(t('saved')); }
+    }));
+    document.querySelector('#erase').before(discard);
+  }
   document.querySelector('#language-settings').addEventListener('submit', event => {
     event.preventDefault();
     run(async () => {
@@ -304,7 +369,7 @@ async function settingsScreen() {
       if (!LANGUAGES.includes(language)) throw new Error('invalidLanguage');
       const settings = { ...s, language };
       await store.saveSettings(settings);
-      state.settings = settings; state.dirty = false; t = translator(language);
+      state.settings = settings; state.dirty = false; t = translator(language, isAndroid);
       await settingsScreen(); feedback(t('saved'));
     }, event.target);
   });
@@ -315,13 +380,13 @@ async function settingsScreen() {
       const data = await store.backup(state.settings);
       const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
       if (blob.size > LIMITS.backupBytes) throw new Error('limitReached');
-      download(blob, `arbeitmgmt-private-backup-${new Date().toISOString().slice(0, 10)}.json`);
+      await download(blob, `arbeitmgmt-private-backup-${new Date().toISOString().slice(0, 10)}.json`);
       const settings = { ...state.settings, lastBackupAt: new Date().toISOString() };
       await store.saveSettings(settings); state.settings = settings; state.dirty = false;
       await settingsScreen(); feedback(t('backupReady'));
     });
   });
-  document.querySelector('#restore').addEventListener('change', event => {
+  document.querySelector('#restore')?.addEventListener('change', event => {
     const file = event.target.files[0];
     if (!file) return;
     if (!confirm(t('restoreConfirm'))) { event.target.value = ''; return; }
@@ -330,11 +395,24 @@ async function settingsScreen() {
       let data;
       try { data = JSON.parse(await file.text()); } catch { throw new Error('invalidBackup'); }
       const settings = await store.restore(data);
-      state.settings = settings; t = translator(settings.language); state.dirty = false;
+      if (isAndroid) await native.discardPhoto();
+      state.settings = settings; t = translator(settings.language, isAndroid); state.dirty = false;
       await navigate('home'); feedback(t('restoreDone'));
     });
   });
-  document.querySelector('#persistence').addEventListener('click', () => run(async () => {
+  document.querySelector('#native-restore')?.addEventListener('click', () => {
+    if (!confirm(t('restoreConfirm'))) return;
+    run(async () => {
+      const { text } = await native.importBackup();
+      let data;
+      try { data = JSON.parse(text); } catch { throw new Error('invalidBackup'); }
+      const settings = await store.restore(data);
+      await native.discardPhoto();
+      state.settings = settings; t = translator(settings.language, isAndroid); state.dirty = false;
+      await navigate('home'); feedback(t('restoreDone'));
+    });
+  });
+  document.querySelector('#persistence')?.addEventListener('click', () => run(async () => {
     state.storageStatus = await navigator.storage.persist() ? 'persistentGranted' : 'persistentDenied';
     document.querySelector('#storage-status').textContent = t(state.storageStatus);
   }));
@@ -342,6 +420,7 @@ async function settingsScreen() {
     if (!confirm(t('eraseConfirm'))) return;
     run(async () => {
       await store.erase();
+      if (isAndroid) await native.clearTransientFiles();
       state.settings = null; state.visits = []; state.visit = null; state.dirty = false; state.pdf = null; state.report = null;
       setup();
     });
@@ -362,6 +441,7 @@ window.addEventListener('beforeunload', event => {
 });
 
 async function offlineSetup() {
+  if (isAndroid) { state.offline = 'offlineReady'; offlineStatus(); return; }
   if (!('serviceWorker' in navigator)) { state.offline = 'offlineFailed'; offlineStatus(); return; }
   const timer = setTimeout(() => {
     if (state.offline === 'offlinePending') {
@@ -390,8 +470,19 @@ frame(`<p>${escape(t('loading'))}</p>`);
 try {
   await store.open();
   state.settings = await store.settings();
-  if (state.settings) { t = translator(state.settings.language); await navigate('home'); }
+  if (state.settings) { t = translator(state.settings.language, isAndroid); await navigate('home'); }
   else setup();
+  if (isAndroid) {
+    await native.addListener('photoReady', () => run(recoverPhoto));
+    await native.addListener('nativeError', () => feedback(t('nativeFailed'), true));
+    await native.addListener('hardwareBack', () => {
+      if (!state.busy && canLeave()) run(async () => {
+        if (state.screen === 'home' || !state.settings) await native.background();
+        else await navigate('home');
+      });
+    });
+    void run(recoverPhoto);
+  }
   void offlineSetup();
 } catch (error) {
   console.error('Unable to open local records:', error.name, error.message);

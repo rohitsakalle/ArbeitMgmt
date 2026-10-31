@@ -6,6 +6,22 @@ On 27 October 2026 this Windows environment had no `adb` on PATH, no executable 
 
 The automated checks use **desktop Edge with a narrow viewport**, not Android hardware. They establish desktop persistence, offline/PDF behavior and file-handoff API contracts only. An emulator, mobile viewport, intercepted sharing API or desktop browser is not a pass for this checklist.
 
+## Native APK acceptance (current primary target)
+
+The initial PWA procedure below is retained for the web beta. For the native Android app, use [the Android debug build/install guide](ANDROID.md): build `npm run android:build`, obtain owner approval, select the exact authorised serial, install the debug APK with `adb -s APPROVED_SERIAL install -r`, then start `at.arbeitmgmt.beta/.MainActivity`. No server, browser installation, HTTPS hosting or USB reverse is needed. Export and verify any existing native backup before an update/signature change; never uninstall or clear real data as a troubleshooting shortcut.
+
+Record APK SHA-256, version code/name, Android and **System WebView** versions rather than Chrome alone. Native rows additionally require:
+
+- System camera and document-picker cancellation/permission denial, imported names/EXIF orientation, 6 MB/40 MP limits and descriptive captions; no broad storage/microphone/location permission.
+- Type before camera launch; confirm saved text survives process kill during the external activity. Finish/recover or explicitly discard the pending photo on relaunch without duplicates, partial inclusion or private-item changes.
+- Offline cold app launch with Wi-Fi/mobile data off and USB disconnected; saved records and actual PDF preview/save must work using local file providers. Native readiness means assets are packaged, not a service-worker cache.
+- Force-stop only this consented synthetic app using `adb -s APPROVED_SERIAL shell am force-stop at.arbeitmgmt.beta`; relaunch offline and compare saved originals/history. Unsaved typing is explicitly not promised to survive.
+- Real `ACTION_CREATE_DOCUMENT` save completion and JSON restore from local files; use a second consenting device for device-loss recovery. Do not treat intercepted test intents as a real provider UI pass.
+- Share into an actual tester-controlled recipient app; confirm that the received `content://` PDF contains only included items and has no originals/private data. Chooser opening is not delivery. FileProvider must not expose the record store.
+- Verify native hardware-back unsaved warning, keyboard/edge insets, large text, TalkBack and a real PDF reader. Screen capture is blocked intentionally; record observations rather than bypassing it.
+
+**Every physical-device row remains NOT RUN.** Emulator evidence, when recorded in the Android guide, does not change this status.
+
 ## Safe local connection, after owner approval
 
 Use only a device whose owner explicitly approves testing, Chrome site storage, sample photographs, any home-screen installation and the temporary USB debugging connection. Do not use real customer data or photograph people.

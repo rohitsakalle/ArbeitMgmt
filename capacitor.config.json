@@ -1,0 +1,16 @@
+{
+  "appId": "at.arbeitmgmt.beta",
+  "appName": "ArbeitMgmt Beta",
+  "webDir": "dist",
+  "loggingBehavior": "none",
+  "server": {
+    "androidScheme": "https",
+    "hostname": "localhost"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false,
+    "captureInput": true,
+    "minWebViewVersion": 130
+  }
+}

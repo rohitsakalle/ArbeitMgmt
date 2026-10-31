@@ -5,6 +5,7 @@ const require = createRequire(import.meta.url);
 
 await mkdir('src/vendor', { recursive: true });
 const files = [
+  ['node_modules/@capacitor/core/dist/index.js', 'capacitor.js'],
   ['node_modules/pdfmake/build/pdfmake.min.js', 'pdfmake.min.js'],
   ['node_modules/pdfmake/build/vfs_fonts.js', 'vfs_fonts.js'],
   ['node_modules/pdfjs-dist/build/pdf.mjs', 'pdf.mjs'],
